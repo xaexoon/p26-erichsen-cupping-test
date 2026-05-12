@@ -16,6 +16,44 @@ const formatDate = (date) => {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 };
 
+function CameraStream() {
+    const [streamKey, setStreamKey] = useState(Date.now());
+    const [hasError, setHasError] = useState(false);
+
+    // 끊기면 3초 후 재연결
+    useEffect(() => {
+        if (!hasError) return;
+        const timer = setTimeout(() => {
+            setStreamKey(Date.now());
+            setHasError(false);
+        }, 3000);
+        return () => clearTimeout(timer);
+    }, [hasError]);
+
+    return (
+        <div className="w-full h-full bg-black rounded-[30px] overflow-hidden flex items-center justify-center">
+            {!hasError ? (
+                <img
+                    key={streamKey}
+                    src={`/video/stream?t=${streamKey}`}
+                    alt="camera stream"
+                    className="w-full h-full object-contain"
+                    onError={() => setHasError(true)}
+                />
+            ) : (
+                <div className="flex flex-col items-center gap-[10px]">
+                    <span className="text-white text-[24px]">
+                        카메라 연결 중...
+                    </span>
+                    <span className="text-[#8F99A6] text-[18px]">
+                        스트림 재연결 시도 중
+                    </span>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function Main() {
     const { data, status } = useMainWs();
     const [mainData, setMainData] = useState(null);
@@ -258,7 +296,7 @@ export default function Main() {
                     </div>
 
                     {/* 테이블 영역 */}
-                    <div className="w-full flex flex-1 bg-[#30363E] rounded-[15px] overflow-y-auto">
+                    <div className="w-full flex-1 bg-[#30363E] rounded-[15px] overflow-y-auto">
                         <table className="w-full ">
                             <thead className="h-[40px] text-white">
                                 <tr>
@@ -280,11 +318,11 @@ export default function Main() {
                                 {inspectionResults.map((item, i) => (
                                     <tr
                                         key={item.result_id}
-                                        className={
+                                        className={`h-[50px] ${
                                             i % 2 === 0
                                                 ? "bg-[#454C56]"
                                                 : "bg-[#3A4048]"
-                                        }
+                                        }`}
                                     >
                                         <td className="py-[8px]">{i + 1}</td>
                                         <td className="py-[8px]">
@@ -348,7 +386,7 @@ export default function Main() {
                     </div>
 
                     <div className="flex flex-1">
-                        <div className="w-full h-full bg-white rounded-[30px]"></div>
+                        <CameraStream />
                     </div>
                 </div>
             </div>
