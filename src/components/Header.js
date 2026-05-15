@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { postDownload } from "../api/apiConfig";
 import Modal from "./Modal";
-import { ReactComponent as AiandLogo } from "../assets/images/aiand_logo.svg";
 import { ReactComponent as KRoad } from "../assets/images/k_road_robotics.svg";
 import { ReactComponent as MainIcon } from "../assets/images/main_icon.svg";
 import { ReactComponent as SettingIcon } from "../assets/images/setting_icon.svg";

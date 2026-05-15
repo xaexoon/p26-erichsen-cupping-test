@@ -4,7 +4,14 @@ import { ReactComponent as SearchIcon } from "../assets/images/search_icon.svg";
 
 import SimpleBar from "simplebar-react";
 import "simplebar-react/dist/simplebar.min.css";
-import { getInfoSetting, postInfoSettingRefresh } from "../api/apiConfig";
+import {
+    getInfoSetting,
+    getInfoSettingBySeq,
+    putInfoSetting,
+    postInfoSetting,
+    deleteInfoSetting,
+} from "../api/apiConfig";
+import Modal from "../components/Modal";
 
 const COLUMNS = [
     { key: "idx", label: "순번", width: "w-[80px]" },
@@ -139,32 +146,40 @@ function Divider() {
 
 export default function InfoManage() {
     const [infoData, setInfoData] = useState([]);
-    const [refreshData, setRefreshData] = useState(null);
+    const [keyword, setKeyword] = useState("");
     const [modalState, setModalState] = useState({
         isOpen: false,
         mode: "add",
         selectedRow: null,
     });
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [resultModal, setResultModal] = useState(null);
 
-    const fetchData = () => {
-        getInfoSetting()
+    const closeModal = () => {
+        setModalState((prev) => ({ ...prev, isOpen: false }));
+    };
+
+    // 결과 모달 헬퍼 — 다른 모달들도 모두 닫음
+    const showSuccess = (title, message) => {
+        closeModal();
+        setDeleteTarget(null);
+        setResultModal({ title, message, isError: false });
+    };
+
+    const showError = (title, message) => {
+        closeModal();
+        setDeleteTarget(null);
+        setResultModal({ title, message, isError: true });
+    };
+
+    const fetchData = (kw = "") => {
+        getInfoSetting(kw)
             .then((res) => {
-                console.log("info data :", res.data);
-                setInfoData(res.data ?? []);
+                console.log("info data :", res?.data);
+                setInfoData(res?.data ?? []);
             })
             .catch((error) => {
                 console.error("API 에러:", error);
-            });
-    };
-
-    const funcRefresh = () => {
-        postInfoSettingRefresh()
-            .then((res) => {
-                console.log("refresh data : ", res.data);
-                setRefreshData(res.data);
-            })
-            .catch((error) => {
-                console.log("API 에러", error);
             });
     };
 
@@ -176,27 +191,86 @@ export default function InfoManage() {
         setModalState({ isOpen: true, mode: "add", selectedRow: null });
     };
 
-    const openEditModal = (row) => {
-        setModalState({ isOpen: true, mode: "edit", selectedRow: row });
-    };
+    const openEditModal = async (row) => {
+        if (!row?.idx) return;
 
-    const closeModal = () => {
-        setModalState((prev) => ({ ...prev, isOpen: false }));
+        try {
+            const res = await getInfoSettingBySeq(row.idx);
+            if (res?.success) {
+                setModalState({
+                    isOpen: true,
+                    mode: "edit",
+                    selectedRow: res.data,
+                });
+            } else {
+                showError(
+                    "조회 실패",
+                    res?.message ?? "데이터 조회에 실패했습니다.",
+                );
+            }
+        } catch (err) {
+            console.error("상세 조회 에러:", err);
+            showError("오류", "조회 중 오류가 발생했습니다.");
+        }
     };
 
     const handleSubmit = async (payload) => {
         console.log(`${modalState.mode} 요청:`, payload);
-        // TODO: API 호출 (postInfoSetting / putInfoSetting)
-        closeModal();
-        fetchData();
+        const isAdd = modalState.mode === "add";
+
+        try {
+            const api = isAdd ? postInfoSetting : putInfoSetting;
+            const res = await api({ data: payload });
+            console.log(`${modalState.mode} 응답:`, res);
+
+            if (res?.success) {
+                fetchData(keyword);
+                showSuccess(
+                    isAdd ? "추가 완료" : "수정 완료",
+                    isAdd
+                        ? "항목이 추가되었습니다."
+                        : "수정사항이 저장되었습니다.",
+                );
+            } else {
+                showError(
+                    isAdd ? "추가 실패" : "수정 실패",
+                    res?.message ?? "저장에 실패했습니다.",
+                );
+            }
+        } catch (err) {
+            console.error("저장 에러:", err);
+            showError("오류", "저장 중 오류가 발생했습니다.");
+        }
     };
 
-    const handleDelete = async (row) => {
+    // 삭제 버튼 클릭 → 확인 모달 띄우기
+    const handleDelete = (row) => {
         if (!row?.idx) return;
-        console.log("삭제 요청:", row.idx);
-        // TODO: API 호출 (deleteInfoSetting)
-        closeModal();
-        fetchData();
+        setDeleteTarget(row);
+    };
+
+    // 확인 모달에서 "삭제" 클릭 → 실제 API 호출
+    const confirmDelete = async () => {
+        if (!deleteTarget?.idx) return;
+
+        console.log("삭제 요청:", deleteTarget.idx);
+
+        try {
+            const res = await deleteInfoSetting({
+                data: { idx: deleteTarget.idx },
+            });
+            console.log("삭제 응답:", res);
+
+            if (res?.success) {
+                fetchData(keyword);
+                showSuccess("삭제 완료", "정상적으로 삭제되었습니다.");
+            } else {
+                showError("삭제 실패", res?.message ?? "삭제에 실패했습니다.");
+            }
+        } catch (err) {
+            console.error("삭제 에러:", err);
+            showError("오류", "삭제 중 오류가 발생했습니다.");
+        }
     };
 
     return (
@@ -208,13 +282,18 @@ export default function InfoManage() {
                         <input
                             className="w-full h-full bg-[#454C56] text-white text-[24px] pl-[20px] pr-[60px] rounded-[10px] outline-none"
                             placeholder="검색어를 입력하세요"
+                            value={keyword}
+                            onChange={(e) => setKeyword(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") fetchData(keyword);
+                            }}
                         />
                         <SearchIcon className="absolute right-[20px] top-1/2 -translate-y-1/2 pointer-events-none" />
                     </div>
 
                     <div
                         className="flex w-[70px] h-full items-center justify-center rounded-[10px] cursor-pointer"
-                        onClick={fetchData}
+                        onClick={() => fetchData(keyword)}
                     >
                         <RefreshIcon />
                     </div>
@@ -285,6 +364,7 @@ export default function InfoManage() {
                 </div>
             </div>
 
+            {/* 추가/수정 모달 */}
             <InfoModal
                 isOpen={modalState.isOpen}
                 mode={modalState.mode}
@@ -292,6 +372,31 @@ export default function InfoManage() {
                 onSubmit={handleSubmit}
                 onDelete={handleDelete}
                 onClose={closeModal}
+            />
+
+            {/* 삭제 확인 모달 */}
+            <Modal
+                isOpen={!!deleteTarget}
+                onClose={() => setDeleteTarget(null)}
+                onConfirm={confirmDelete}
+                title="삭제 확인"
+                message={`'${deleteTarget?.product_name ?? ""}' 항목을\n정말 삭제하시겠습니까?`}
+                confirmText="삭제"
+                cancelText="취소"
+            />
+
+            {/* 결과 알림 모달 (성공/실패 공용) */}
+            <Modal
+                isOpen={!!resultModal}
+                onClose={() => setResultModal(null)}
+                onConfirm={() => setResultModal(null)}
+                title={resultModal?.title ?? ""}
+                message={resultModal?.message ?? ""}
+                confirmText="확인"
+                showCancel={false}
+                confirmColor={
+                    resultModal?.isError ? "bg-[#E74C3C]" : "bg-[#67A0F0]"
+                }
             />
         </div>
     );

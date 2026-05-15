@@ -16,9 +16,11 @@ export const useMainWs = () => {
         const connect = () => {
             const ws = new WebSocket(BASE_URL);
             wsRef.current = ws;
-
             ws.onopen = () => setStatus("connected");
-            ws.onmessage = (e) => setData(JSON.parse(e.data));
+            ws.onmessage = (e) => {
+                setData(JSON.parse(e.data));
+                console.log(e.data);
+            };
             ws.onclose = () => {
                 setStatus("disconnected");
                 if (shouldReconnect) {

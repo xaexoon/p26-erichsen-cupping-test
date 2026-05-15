@@ -1,3 +1,4 @@
+import { API_BASE } from "../api/config";
 import {
     Listbox,
     ListboxButton,
@@ -6,7 +7,12 @@ import {
 } from "@headlessui/react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useMainWs } from "../api/socketConfig";
-import { getMain, postMainRefresh } from "../api/apiConfig";
+import {
+    getMain,
+    postMainRefresh,
+    postSaveStart,
+    postSaveFinish,
+} from "../api/apiConfig";
 import Modal from "../components/Modal";
 
 const STEP_LABELS = ["공정 시작", "클램프 정지", "공정 종료"];
@@ -20,7 +26,6 @@ function CameraStream() {
     const [streamKey, setStreamKey] = useState(Date.now());
     const [hasError, setHasError] = useState(false);
 
-    // 끊기면 3초 후 재연결
     useEffect(() => {
         if (!hasError) return;
         const timer = setTimeout(() => {
@@ -35,7 +40,7 @@ function CameraStream() {
             {!hasError ? (
                 <img
                     key={streamKey}
-                    src={`/video/stream?t=${streamKey}`}
+                    src={`${API_BASE}/video/stream?t=${streamKey}`}
                     alt="camera stream"
                     className="w-full h-full object-contain"
                     onError={() => setHasError(true)}
@@ -55,9 +60,19 @@ function CameraStream() {
 }
 
 export default function Main() {
-    const { data, status } = useMainWs();
-    const [mainData, setMainData] = useState(null);
-    const progress = mainData?.status?.progress ?? -1;
+    // 정적 데이터 (API에서 1회만 로드)
+    const [options, setOptions] = useState({
+        product_options: [],
+        worker_options: [],
+    });
+
+    // 실시간 데이터 (WebSocket으로 갱신)
+    const [live, setLive] = useState({
+        status: null,
+        inspection_result: [],
+    });
+
+    const { data: wsData } = useMainWs();
 
     const [selectedProduct, setSelectedProduct] = useState("");
     const [selectedWorker, setSelectedWorker] = useState("");
@@ -71,38 +86,77 @@ export default function Main() {
     // 둘 다 선택되었는지 확인
     const isReady = selectedProduct !== "" && selectedWorker !== "";
 
-    const inspectionResults = mainData?.inspection_results ?? [];
+    // 파생값
+    const progress = live.status?.progress ?? -1;
+    const inspectionResults = live.inspection_result ?? [];
     const inspectionCount = inspectionResults.length;
 
-    // 1) 초기값: API로 받아오기
+    const handleSaveToggle = async () => {
+        if (isSaving) {
+            // ===== 저장 종료 (파라미터 없음) =====
+            try {
+                const result = await postSaveFinish();
+                console.log("저장 종료 응답:", result);
+
+                if (result?.success) {
+                    setIsSaving(false);
+                }
+            } catch (err) {
+                console.error("저장 종료 에러:", err);
+            }
+        } else {
+            // ===== 저장 시작 (품번/작업자 id 전달) =====
+            if (!isReady) return;
+
+            try {
+                const param = {
+                    data: {
+                        product_id: selectedProduct,
+                        worker_id: selectedWorker,
+                    },
+                };
+                const result = await postSaveStart(param);
+                console.log("저장 시작 응답:", result);
+
+                if (result?.success) {
+                    setIsSaving(true);
+                }
+            } catch (err) {
+                console.error("저장 시작 에러:", err);
+            }
+        }
+    };
+
+    // 1) 첫 렌더 시 옵션 목록 가져오기
     useEffect(() => {
-        console.log("API 호출 시작!");
+        console.log("getMain 호출 시작!");
 
         getMain()
             .then((res) => {
-                console.log("API 응답:", res);
-                setMainData(res.data);
+                console.log("getMain 응답:", res);
+                if (res?.success) {
+                    setOptions(res.data);
+                }
             })
             .catch((err) => {
-                console.log("API 에러:", err);
+                console.error("getMain 에러:", err);
             });
     }, []);
 
-    // 2) 실시간 갱신: WebSocket 데이터로 mainData 업데이트
+    // 2) WS 실시간 갱신
     useEffect(() => {
-        if (!data?.data) return;
+        if (wsData?.type !== "main" || !wsData?.success) return;
 
-        setMainData((prev) => ({
-            ...prev,
-            ...data.data,
-        }));
-    }, [data]);
+        console.log("WS 수신:", wsData);
+        setLive(wsData.data);
+    }, [wsData]);
 
     return (
         <div className="w-full h-full flex-1 bg-[#454C56] rounded-[25px]">
             <div className="flex h-full gap-[50px] pl-[30px] p-[30px]">
                 {/* 왼쪽 */}
-                <div className="flex flex-col flex-1 gap-[40px] h-full">
+                <div className="flex flex-col flex-1 gap-[40px] h-full min-h-0">
+                    {/* 상단 상태 카드 */}
                     <div className="flex h-[150px]">
                         <div className="flex w-full bg-[#30363E] items-center justify-center rounded-[15px]">
                             <div className="flex flex-col items-center justify-center flex-1">
@@ -110,7 +164,7 @@ export default function Main() {
                                     모드
                                 </span>
                                 <span className="text-[#67A0F0] text-[40px]">
-                                    {mainData?.status?.mode ?? "-"}
+                                    {live.status?.mode ?? "-"}
                                 </span>
                             </div>
                             <div className="w-[2px] h-[80px] bg-[#4C555E]"></div>
@@ -119,7 +173,7 @@ export default function Main() {
                                     변위
                                 </span>
                                 <span className="text-[#67A0F0] text-[40px]">
-                                    {mainData?.status?.displacement_mm ?? "-"}
+                                    {live.status?.displacement_mm ?? "-"}
                                     <span className="text-[24px] pl-[10px]">
                                         mm
                                     </span>
@@ -130,7 +184,7 @@ export default function Main() {
                                     하중
                                 </span>
                                 <span className="text-[#67A0F0] text-[40px]">
-                                    {mainData?.status?.load_kgf ?? "-"}
+                                    {live.status?.load_kgf ?? "-"}
                                     <span className="text-[24px] pl-[10px]">
                                         kgf
                                     </span>
@@ -141,7 +195,7 @@ export default function Main() {
                                     최대하중
                                 </span>
                                 <span className="text-[#67A0F0] text-[40px]">
-                                    {mainData?.status?.max_load_kgf ?? "-"}
+                                    {live.status?.max_load_kgf ?? "-"}
                                     <span className="text-[24px] pl-[10px]">
                                         kgf
                                     </span>
@@ -150,8 +204,8 @@ export default function Main() {
                         </div>
                     </div>
 
+                    {/* 품번/작업자 + 버튼 */}
                     <div className="flex h-[120px] w-full gap-[30px]">
-                        {/* 품번/작업자 */}
                         <div className="flex flex-col justify-center flex-1 gap-[10px]">
                             <div className="flex gap-[30px]">
                                 <span className="flex w-[120px] text-white items-center justify-end text-[32px]">
@@ -161,17 +215,24 @@ export default function Main() {
                                     <Listbox
                                         value={selectedProduct}
                                         onChange={setSelectedProduct}
+                                        disabled={isSaving}
                                     >
                                         <div className="relative w-full h-full">
-                                            <ListboxButton className="w-full h-full bg-[#30363E] rounded-[10px] text-white text-center text-[28px] flex items-center justify-center">
-                                                {mainData?.product_options?.find(
+                                            <ListboxButton
+                                                className={`w-full h-full bg-[#30363E] rounded-[10px] text-white text-center text-[28px] flex items-center justify-center ${
+                                                    isSaving
+                                                        ? "opacity-50 cursor-not-allowed"
+                                                        : "cursor-pointer"
+                                                }`}
+                                            >
+                                                {options.product_options.find(
                                                     (p) =>
                                                         p.id ===
                                                         selectedProduct,
                                                 )?.product_name ?? "품번 선택"}
                                             </ListboxButton>
                                             <ListboxOptions className="absolute z-10 w-full mt-2 bg-[#30363E] rounded-[10px] py-2 max-h-[300px] overflow-auto shadow-lg focus:outline-none">
-                                                {mainData?.product_options?.map(
+                                                {options.product_options.map(
                                                     (product) => (
                                                         <ListboxOption
                                                             key={product.id}
@@ -207,16 +268,23 @@ export default function Main() {
                                     <Listbox
                                         value={selectedWorker}
                                         onChange={setSelectedWorker}
+                                        disabled={isSaving}
                                     >
                                         <div className="relative w-full h-full">
-                                            <ListboxButton className="w-full h-full bg-[#30363E] rounded-[10px] text-white text-center text-[28px] flex items-center justify-center">
-                                                {mainData?.worker_options?.find(
+                                            <ListboxButton
+                                                className={`w-full h-full bg-[#30363E] rounded-[10px] text-white text-center text-[28px] flex items-center justify-center ${
+                                                    isSaving
+                                                        ? "opacity-50 cursor-not-allowed"
+                                                        : "cursor-pointer"
+                                                }`}
+                                            >
+                                                {options.worker_options.find(
                                                     (w) =>
                                                         w.id === selectedWorker,
                                                 )?.worker_name ?? "작업자 선택"}
                                             </ListboxButton>
                                             <ListboxOptions className="absolute z-10 w-full mt-2 bg-[#30363E] rounded-[10px] py-2 max-h-[300px] overflow-auto shadow-lg focus:outline-none">
-                                                {mainData?.worker_options?.map(
+                                                {options.worker_options.map(
                                                     (worker) => (
                                                         <ListboxOption
                                                             key={worker.id}
@@ -242,30 +310,12 @@ export default function Main() {
                                 </div>
                             </div>
                         </div>
+
                         {/* 저장 시작 / Clear */}
                         <div className="flex h-full items-center justify-center gap-[30px]">
                             <button
                                 disabled={!isSaving && !isReady}
-                                onClick={() => {
-                                    if (isSaving) {
-                                        // 저장 시작 시간 이후 들어온 데이터만 추출
-                                        const sessionData =
-                                            inspectionResults.filter(
-                                                (item) =>
-                                                    item.date >=
-                                                    sessionStartTimeRef.current,
-                                            );
-                                        console.log(
-                                            "이번 세션 데이터:",
-                                            sessionData,
-                                        );
-                                        setIsSaving(false);
-                                    } else {
-                                        sessionStartTimeRef.current =
-                                            formatDate(new Date());
-                                        setIsSaving(true);
-                                    }
-                                }}
+                                onClick={handleSaveToggle}
                                 className={`flex w-[180px] h-full rounded-[15px] ${
                                     isSaving
                                         ? "bg-[#727982] cursor-pointer"
@@ -296,8 +346,8 @@ export default function Main() {
                     </div>
 
                     {/* 테이블 영역 */}
-                    <div className="w-full flex-1 bg-[#30363E] rounded-[15px] overflow-y-auto">
-                        <table className="w-full ">
+                    <div className="w-full flex-1 min-h-0 bg-[#30363E] rounded-[15px] overflow-y-auto">
+                        <table className="w-full">
                             <thead className="h-[40px] text-white">
                                 <tr>
                                     <th className="w-[11%] text-[20px]">
@@ -317,7 +367,7 @@ export default function Main() {
                             <tbody className="text-white text-center">
                                 {inspectionResults.map((item, i) => (
                                     <tr
-                                        key={item.result_id}
+                                        key={item.idx}
                                         className={`h-[50px] ${
                                             i % 2 === 0
                                                 ? "bg-[#454C56]"
@@ -326,13 +376,13 @@ export default function Main() {
                                     >
                                         <td className="py-[8px]">{i + 1}</td>
                                         <td className="py-[8px]">
-                                            {item.date}
+                                            {item.check_time}
                                         </td>
                                         <td className="py-[8px]">
-                                            {item.displacement_mm}
+                                            {item.displacement}
                                         </td>
                                         <td className="py-[8px]">
-                                            {item.max_load_kgf}
+                                            {item.displacement}
                                         </td>
                                     </tr>
                                 ))}
@@ -342,7 +392,7 @@ export default function Main() {
                 </div>
 
                 {/* 오른쪽 */}
-                <div className="flex flex-col flex-1 gap-[40px]">
+                <div className="flex flex-col flex-1 gap-[40px] min-h-0">
                     <div className="flex h-[150px]">
                         <div className="flex w-full justify-center items-center">
                             <div className="flex flex-col gap-[20px]">
@@ -385,11 +435,12 @@ export default function Main() {
                         </div>
                     </div>
 
-                    <div className="flex flex-1">
+                    <div className="flex flex-1 min-h-0">
                         <CameraStream />
                     </div>
                 </div>
             </div>
+
             <Modal
                 isOpen={isClearModalOpen}
                 onClose={() => setIsClearModalOpen(false)}

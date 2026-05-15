@@ -1,6 +1,8 @@
 import axios from "axios";
 import { API_BASE } from "./config";
 
+// ################## 시스템 설정 ##################
+
 // axios 인스턴스 생성 - 공통 설정을 한 곳에서 관리
 const api = axios.create({
     baseURL: API_BASE,
@@ -22,7 +24,6 @@ export const postDownload = async () => {
 export const getMain = async () => {
     try {
         const res = await api.get("/main");
-        console.log("main data:", res.data);
         return res.data;
     } catch (error) {
         console.error("API 에러:", error);
@@ -39,6 +40,28 @@ export const postMainRefresh = async (time) => {
         return null;
     }
 };
+
+export const postSaveStart = async (data) => {
+    try {
+        const res = await api.post("/save_start", data);
+        return res.data;
+    } catch (error) {
+        console.error("Main Refresh Error:", error);
+        return null;
+    }
+};
+
+export const postSaveFinish = async () => {
+    try {
+        const res = await api.post("/save_finish");
+        return res.data;
+    } catch (error) {
+        console.error("Main Refresh Error:", error);
+        return null;
+    }
+};
+
+// ################## 시스템 설정 ##################
 
 export const getSystemSetting = async () => {
     try {
@@ -62,12 +85,12 @@ export const putSystemSetting = async (data) => {
     }
 };
 
-// ################## 정보관리 ##################
+// ################## 정보 관리 ##################
 
-export const getInfoSetting = async () => {
+export const getInfoSetting = async (keyword) => {
     try {
-        const res = await api.get("/info_setting");
-        console.log("info setting data:", res.data);
+        const params = keyword ? { keyword } : undefined;
+        const res = await api.get("/info_setting", { params });
         return res.data;
     } catch (error) {
         console.error("API 에러:", error);
@@ -86,9 +109,32 @@ export const getInfoSettingBySeq = async (seq) => {
     }
 };
 
-export const postInfoSettingRefresh = async () => {
+export const putInfoSetting = async (data) => {
     try {
-        const res = await api.post("/info_setting/refresh");
+        const res = await api.put("/info_setting", data);
+        console.log("info setting put data : ", res.data);
+        return res.data;
+    } catch (error) {
+        console.error("API 에러:", error);
+        return null;
+    }
+};
+
+export const postInfoSetting = async (data) => {
+    try {
+        const res = await api.post("/info_setting", data);
+        console.log("info setting post data : ", res.data);
+        return res.data;
+    } catch (error) {
+        console.error("API 에러:", error);
+        return null;
+    }
+};
+
+export const deleteInfoSetting = async (seq) => {
+    try {
+        const res = await api.delete(`/info_setting/${seq}`);
+        console.log("info setting delete data : ", res.data);
         return res.data;
     } catch (error) {
         console.error("API 에러:", error);
